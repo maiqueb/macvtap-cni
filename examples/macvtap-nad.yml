@@ -8,6 +8,5 @@ spec:
       "type": "macvtap",
       "master": "eth0",
       "mode": "bridge",
-      "mac": "52:54:00:11:11:11",
       "mtu": 1500
     }'
