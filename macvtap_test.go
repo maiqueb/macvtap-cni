@@ -29,7 +29,6 @@ import (
 )
 
 const MASTER_NAME = "eth0"
-const PrivateMACPrefixString = "0a:59"
 const macAddress = "0a:59:00:dc:6a:e0"
 
 var _ = Describe("macvtap Operations", func() {
@@ -73,7 +72,6 @@ var _ = Describe("macvtap Operations", func() {
 			Master: MASTER_NAME,
 			Mode:   "bridge",
 			MTU:    1500,
-			MAC:    macAddress,
 		}
 
 		targetNs, err := testutils.NewNS()
@@ -101,16 +99,15 @@ var _ = Describe("macvtap Operations", func() {
 		Expect(err).NotTo(HaveOccurred())
 	})
 
-	It("configures and deconfigures a macvtap link with ADD/DEL", func() {
+	It("configures and deconfigures a macvtap link having a user specified mac address with ADD/DEL", func() {
 		const IFNAME = "macvt0"
 
 		conf := fmt.Sprintf(`{
     		"cniVersion": "0.3.1",
     		"name": "mynet",
     		"type": "macvtap",
-    		"mac": "%s",
     		"master": "%s"
-		}`, macAddress, MASTER_NAME)
+		}`, MASTER_NAME)
 
 		targetNs, err := testutils.NewNS()
 		Expect(err).NotTo(HaveOccurred())
@@ -121,6 +118,7 @@ var _ = Describe("macvtap Operations", func() {
 			Netns:       targetNs.Path(),
 			IfName:      IFNAME,
 			StdinData:   []byte(conf),
+			Args:        fmt.Sprintf("MAC=%s", macAddress),
 		}
 
 		// Make sure macvtap link exists in the target namespace
@@ -141,9 +139,6 @@ var _ = Describe("macvtap Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(link.Attrs().Name).To(Equal(IFNAME))
 			Expect(link.Attrs().HardwareAddr.String()).To(Equal(macAddress))
-
-			hwAddr := fmt.Sprintf("%s", link.Attrs().HardwareAddr)
-			Expect(hwAddr).To(HavePrefix(PrivateMACPrefixString))
 
 			return nil
 		})
@@ -174,6 +169,122 @@ var _ = Describe("macvtap Operations", func() {
 			link, err := netlink.LinkByName(IFNAME)
 			Expect(err).To(HaveOccurred())
 			Expect(link).To(BeNil())
+			return nil
+		})
+		Expect(err).NotTo(HaveOccurred())
+	})
+	It("configures and deconfigures a macvtap link having an auto-generated mac address with ADD/DEL", func() {
+		const IFNAME = "macvt0"
+
+		conf := fmt.Sprintf(`{
+    		"cniVersion": "0.3.1",
+    		"name": "mynet",
+    		"type": "macvtap",
+    		"master": "%s"
+		}`, MASTER_NAME)
+
+		targetNs, err := testutils.NewNS()
+		Expect(err).NotTo(HaveOccurred())
+		defer targetNs.Close()
+
+		args := &skel.CmdArgs{
+			ContainerID: "dummy",
+			Netns:       targetNs.Path(),
+			IfName:      IFNAME,
+			StdinData:   []byte(conf),
+		}
+
+		// Make sure macvtap link exists in the target namespace
+		err = originalNS.Do(func(ns.NetNS) error {
+			defer GinkgoRecover()
+
+			_, _, err := testutils.CmdAdd(args.Netns, args.ContainerID, args.IfName, args.StdinData, func() error { return cmdAdd(args) })
+			Expect(err).NotTo(HaveOccurred())
+			return nil
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		// Make sure macvtap link exists in the target namespace
+		err = targetNs.Do(func(ns.NetNS) error {
+			defer GinkgoRecover()
+
+			link, err := netlink.LinkByName(IFNAME)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(link.Attrs().Name).To(Equal(IFNAME))
+			hwAddr := fmt.Sprintf("%s", link.Attrs().HardwareAddr)
+			Expect(hwAddr).NotTo(BeNil())
+
+			return nil
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		err = originalNS.Do(func(ns.NetNS) error {
+			defer GinkgoRecover()
+
+			args := &skel.CmdArgs{
+				ContainerID: "dummy",
+				Netns:       targetNs.Path(),
+				IfName:      IFNAME,
+				StdinData:   []byte(conf),
+			}
+
+			err := testutils.CmdDel(args.Netns, args.ContainerID, args.IfName, func() error {
+				return cmdDel(args)
+			})
+			Expect(err).NotTo(HaveOccurred())
+			return nil
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		// Make sure macvtap link has been deleted
+		err = targetNs.Do(func(ns.NetNS) error {
+			defer GinkgoRecover()
+
+			link, err := netlink.LinkByName(IFNAME)
+			Expect(err).To(HaveOccurred())
+			Expect(link).To(BeNil())
+			return nil
+		})
+		Expect(err).NotTo(HaveOccurred())
+	})
+	It("fails to configure a macvtap device with invalid env args", func() {
+		const IFNAME = "macvt0"
+
+		conf := fmt.Sprintf(`{
+    		"cniVersion": "0.3.1",
+    		"name": "mynet",
+    		"type": "macvtap",
+    		"master": "%s"
+		}`, MASTER_NAME)
+
+		targetNs, err := testutils.NewNS()
+		Expect(err).NotTo(HaveOccurred())
+		defer targetNs.Close()
+
+		args := &skel.CmdArgs{
+			ContainerID: "dummy",
+			Netns:       targetNs.Path(),
+			IfName:      IFNAME,
+			StdinData:   []byte(conf),
+			Args:        "WHY=petr_made_me_do_it",
+		}
+
+		// expect the macvtap creation to have failed, because of the invalid argument
+		err = originalNS.Do(func(ns.NetNS) error {
+			defer GinkgoRecover()
+
+			_, _, err := testutils.CmdAdd(args.Netns, args.ContainerID, args.IfName, args.StdinData, func() error { return cmdAdd(args) })
+			Expect(err).To(HaveOccurred())
+			return nil
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		// Make sure macvtap link does not exist in the target namespace
+		err = targetNs.Do(func(ns.NetNS) error {
+			defer GinkgoRecover()
+
+			_, err := netlink.LinkByName(IFNAME)
+			Expect(err).To(HaveOccurred())
 			return nil
 		})
 		Expect(err).NotTo(HaveOccurred())

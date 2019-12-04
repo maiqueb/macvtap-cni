@@ -41,8 +41,12 @@ type NetConf struct {
 	types.NetConf
 	Master string `json:"master"`
 	Mode   string `json:"mode"`
-	MTU    int    `json:"mtu"`
-	MAC    string `json:"mac"`
+	MTU    int    `json:"mtu,omitempty"`
+}
+
+type EnvArgs struct {
+	types.CommonArgs
+	MAC types.UnmarshallableString `json:"mac,omitempty"`
 }
 
 func init() {
@@ -71,6 +75,18 @@ func loadConf(bytes []byte) (*NetConf, string, error) {
 	}
 
 	return n, n.CNIVersion, nil
+}
+
+func getEnvArgs(envArgsString string) (EnvArgs, error) {
+	if envArgsString != "" {
+		e := EnvArgs{}
+		err := types.LoadArgs(envArgsString, &e)
+		if err != nil {
+			return EnvArgs{}, err
+		}
+		return e, nil
+	}
+	return EnvArgs{}, nil
 }
 
 func getMTUByName(ifName string) (int, error) {
@@ -206,16 +222,24 @@ func cmdAdd(args *skel.CmdArgs) error {
 		}
 	}()
 
-	if n.MAC != "" {
+	envArgs, err := getEnvArgs(args.Args)
+	if err != nil {
+		return err
+	}
+
+	var mac net.HardwareAddr
+	if envArgs.MAC != "" {
+		mac, err = net.ParseMAC(string(envArgs.MAC))
+		if err != nil {
+			return err
+		}
+	}
+
+	if mac.String() != "" {
 		err = netns.Do(func(_ ns.NetNS) error {
 			macIf, err := netlink.LinkByName(args.IfName)
 			if err != nil {
 				return fmt.Errorf("failed to lookup new macvtapdevice %q: %v", args.IfName, err)
-			}
-
-			mac, err := net.ParseMAC(n.MAC)
-			if err != nil {
-				return fmt.Errorf("failed to read provided MAC address %q: %v", n.MAC, err)
 			}
 
 			if err = netlink.LinkSetHardwareAddr(macIf, mac); err != nil {
