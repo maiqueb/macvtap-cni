@@ -197,6 +197,15 @@ func cmdAdd(args *skel.CmdArgs) error {
 		return err
 	}
 
+	// Delete link if err to avoid link leak in this ns
+	defer func() {
+		if err != nil {
+			netns.Do(func(_ ns.NetNS) error {
+				return ip.DelLinkByName(args.IfName)
+			})
+		}
+	}()
+
 	if n.MAC != "" {
 		err = netns.Do(func(_ ns.NetNS) error {
 			macIf, err := netlink.LinkByName(args.IfName)
@@ -219,15 +228,6 @@ func cmdAdd(args *skel.CmdArgs) error {
 			return err
 		}
 	}
-
-	// Delete link if err to avoid link leak in this ns
-	defer func() {
-		if err != nil {
-			netns.Do(func(_ ns.NetNS) error {
-				return ip.DelLinkByName(args.IfName)
-			})
-		}
-	}()
 
 	result := &current.Result{
 		CNIVersion: cniVersion,
