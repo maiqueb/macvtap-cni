@@ -4,8 +4,10 @@ github.com/containernetworking/cni/pkg/types
 github.com/containernetworking/cni/pkg/types/current
 github.com/containernetworking/cni/pkg/version
 github.com/containernetworking/cni/pkg/types/020
+github.com/containernetworking/cni/pkg/invoke
 # github.com/containernetworking/plugins v0.8.3
 github.com/containernetworking/plugins/pkg/ip
+github.com/containernetworking/plugins/pkg/ipam
 github.com/containernetworking/plugins/pkg/ns
 github.com/containernetworking/plugins/pkg/utils/buildversion
 github.com/containernetworking/plugins/pkg/utils/sysctl
@@ -19,6 +21,8 @@ github.com/hpcloud/tail/ratelimiter
 github.com/hpcloud/tail/util
 github.com/hpcloud/tail/watch
 github.com/hpcloud/tail/winfile
+# github.com/j-keck/arping v0.0.0-20160618110441-2cf9dc699c56
+github.com/j-keck/arping
 # github.com/onsi/ginkgo v1.10.3
 github.com/onsi/ginkgo
 github.com/onsi/ginkgo/config

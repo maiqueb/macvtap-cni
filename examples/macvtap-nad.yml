@@ -10,5 +10,8 @@ spec:
       "type": "macvtap",
       "master": "eth0",
       "mode": "bridge",
-      "mtu": 1500
+      "mtu": 1500,
+      "ipam": {
+          "type": "dhcp"
+      }
     }'

@@ -16,10 +16,12 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"runtime"
 
+	"github.com/j-keck/arping"
 	"github.com/vishvananda/netlink"
 
 	"github.com/containernetworking/cni/pkg/skel"
@@ -28,6 +30,7 @@ import (
 	"github.com/containernetworking/cni/pkg/version"
 
 	"github.com/containernetworking/plugins/pkg/ip"
+	"github.com/containernetworking/plugins/pkg/ipam"
 	"github.com/containernetworking/plugins/pkg/ns"
 	bv "github.com/containernetworking/plugins/pkg/utils/buildversion"
 	"github.com/containernetworking/plugins/pkg/utils/sysctl"
@@ -315,6 +318,60 @@ func cmdAdd(args *skel.CmdArgs) error {
 		Interfaces: []*current.Interface{macvtapInterface},
 	}
 
+	isLayer3 := n.IPAM.Type != ""
+	if isLayer3 {
+		// run the IPAM plugin and get back the config to apply
+		r, err := ipam.ExecAdd(n.IPAM.Type, args.StdinData)
+		if err != nil {
+			return err
+		}
+
+		// Invoke ipam del if err to avoid ip leak
+		defer func() {
+			if err != nil {
+				ipam.ExecDel(n.IPAM.Type, args.StdinData)
+			}
+		}()
+
+		// Convert whatever the IPAM result was into the current Result type
+		ipamResult, err := current.NewResultFromResult(r)
+		if err != nil {
+			return err
+		}
+
+		if len(ipamResult.IPs) == 0 {
+			return errors.New("IPAM plugin returned missing IP config")
+		}
+
+		result.IPs = ipamResult.IPs
+		result.Routes = ipamResult.Routes
+
+		for _, ipc := range result.IPs {
+			// All addresses apply to the container macvlan interface
+			ipc.Interface = current.Int(0)
+		}
+
+		err = netns.Do(func(_ ns.NetNS) error {
+			if err := ipam.ConfigureIface(args.IfName, result); err != nil {
+				return err
+			}
+
+			contVeth, err := net.InterfaceByName(args.IfName)
+			if err != nil {
+				return fmt.Errorf("failed to look up %q: %v", args.IfName, err)
+			}
+
+			for _, ipc := range result.IPs {
+				if ipc.Version == "4" {
+					_ = arping.GratuitousArpOverIface(ipc.Address.IP, *contVeth)
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+	}
 	return types.PrintResult(result, cniVersion)
 }
 
