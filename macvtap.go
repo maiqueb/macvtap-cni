@@ -39,9 +39,10 @@ const (
 
 type NetConf struct {
 	types.NetConf
-	Master string `json:"master"`
-	Mode   string `json:"mode"`
-	MTU    int    `json:"mtu,omitempty"`
+	Master   string `json:"master"`
+	Mode     string `json:"mode"`
+	MTU      int    `json:"mtu,omitempty"`
+	DeviceID string `json:"deviceID,omitempty"`
 }
 
 type EnvArgs struct {
@@ -154,46 +155,65 @@ func createMacvtap(conf *NetConf, ifName string, netns ns.NetNS) (*current.Inter
 			Mode: mode,
 		},
 	}
-
 	if err := netlink.LinkAdd(mv); err != nil {
 		return nil, fmt.Errorf("failed to create macvtap: %v", err)
 	}
 
-	err = netns.Do(func(_ ns.NetNS) error {
+	err = configureArp(mv, macvlan, ifName, netns)
+	return macvlan, nil
+}
+
+func configureArp(macvtapConfig netlink.Link, macvtapIface *current.Interface, ifaceName string, netns ns.NetNS) error {
+	err := netns.Do(func(_ ns.NetNS) error {
 		// TODO: duplicate following lines for ipv6 support, when it will be added in other places
-		ipv4SysctlValueName := fmt.Sprintf(IPv4InterfaceArpProxySysctlTemplate, tmpName)
+		ipv4SysctlValueName := fmt.Sprintf(IPv4InterfaceArpProxySysctlTemplate, macvtapConfig.Attrs().Name)
 		if _, err := sysctl.Sysctl(ipv4SysctlValueName, "1"); err != nil {
 			// remove the newly added link and ignore errors, because we already are in a failed state
-			_ = netlink.LinkDel(mv)
-			return fmt.Errorf("failed to set proxy_arp on newly added interface %q: %v", tmpName, err)
+			_ = netlink.LinkDel(macvtapConfig)
+			return fmt.Errorf("failed to set proxy_arp on newly added interface %q: %v", macvtapConfig.Attrs().Name, err)
 		}
 
-		err := ip.RenameLink(tmpName, ifName)
+		err := ip.RenameLink(macvtapConfig.Attrs().Name, ifaceName)
 		if err != nil {
-			_ = netlink.LinkDel(mv)
-			return fmt.Errorf("failed to rename macvlan to %q: %v", ifName, err)
+			_ = netlink.LinkDel(macvtapConfig)
+			return fmt.Errorf("failed to rename macvlan to %q: %v", ifaceName, err)
 		}
 
-		updatedLink := mv
-		updatedLink.Attrs().Name = ifName
+		updatedLink := macvtapConfig
+		updatedLink.Attrs().Name = ifaceName
 		if err := netlink.LinkSetUp(updatedLink); err != nil {
 			return fmt.Errorf("failed to set macvtap iface up: %v", err)
 		}
 		// Re-fetch macvlan to get all properties/attributes
-		contMacvlan, err := netlink.LinkByName(ifName)
+		contMacvlan, err := netlink.LinkByName(ifaceName)
 		if err != nil {
-			return fmt.Errorf("failed to refetch macvlan %q: %v", ifName, err)
+			return fmt.Errorf("failed to refetch macvlan %q: %v", ifaceName, err)
 		}
-		macvlan.Mac = contMacvlan.Attrs().HardwareAddr.String()
-		macvlan.Sandbox = netns.Path()
+		macvtapIface.Mac = contMacvlan.Attrs().HardwareAddr.String()
+		macvtapIface.Sandbox = netns.Path()
 
 		return nil
 	})
-	if err != nil {
-		return nil, err
-	}
+	return err
+}
 
-	return macvlan, nil
+func configureMacvtap(conf *NetConf, ifName string, netns ns.NetNS) (*current.Interface, error) {
+	iface, err := netlink.LinkByName(conf.DeviceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to lookup device %q: %v", conf.DeviceID, err)
+	}
+	if err := netlink.LinkSetNsFd(iface, int(netns.Fd())); err != nil {
+		return nil, fmt.Errorf("failed to move iface %s to the netns %d because: %v", iface, netns.Fd(), err)
+	}
+	err = netns.Do(func(_ ns.NetNS) error {
+		if err := netlink.LinkSetMTU(iface, conf.MTU); err != nil {
+			return fmt.Errorf("failed to set the macvtap MTU for %s: %v", conf.DeviceID, err)
+		}
+		return nil
+	})
+	macvtap := &current.Interface{Name: ifName}
+	err = configureArp(iface, macvtap, ifName, netns)
+	return macvtap, err
 }
 
 func cmdAdd(args *skel.CmdArgs) error {
@@ -208,7 +228,12 @@ func cmdAdd(args *skel.CmdArgs) error {
 	}
 	defer netns.Close()
 
-	macvtapInterface, err := createMacvtap(n, args.IfName, netns)
+	var macvtapInterface *current.Interface
+	if n.DeviceID != "" {
+		macvtapInterface, err = configureMacvtap(n, args.IfName, netns)
+	} else {
+		macvtapInterface, err = createMacvtap(n, args.IfName, netns)
+	}
 	if err != nil {
 		return err
 	}
