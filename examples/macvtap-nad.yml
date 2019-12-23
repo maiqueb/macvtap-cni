@@ -2,6 +2,8 @@ apiVersion: "k8s.cni.cncf.io/v1"
 kind: NetworkAttachmentDefinition
 metadata:
   name: macvtap0
+  annotations:
+    k8s.v1.cni.cncf.io/resourceName: macvtap.network.kubevirt.io/eth0
 spec: 
   config: '{
       "cniVersion": "0.3.1",

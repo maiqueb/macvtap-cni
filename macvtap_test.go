@@ -98,6 +98,68 @@ var _ = Describe("macvtap Operations", func() {
 		})
 		Expect(err).NotTo(HaveOccurred())
 	})
+	It("imports an existing macvtap link in a non-default namespace", func() {
+		macvtapIfaceName := "mymacvtap0"
+
+		// create the initial macvtap
+		conf := &NetConf{
+			NetConf: types.NetConf{
+				CNIVersion: "0.3.1",
+				Name:       "testConfig",
+				Type:       "macvtap",
+			},
+			Master: MASTER_NAME,
+			Mode:   "bridge",
+		}
+		targetNs, err := testutils.NewNS()
+		Expect(err).NotTo(HaveOccurred())
+		defer targetNs.Close()
+
+		err = originalNS.Do(func(ns.NetNS) error {
+			defer GinkgoRecover()
+
+			_, err := createMacvtap(conf, macvtapIfaceName, originalNS)
+			Expect(err).NotTo(HaveOccurred())
+			return nil
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		updatedMtu := 1000
+		conf = &NetConf{
+			NetConf: types.NetConf{
+				CNIVersion: "0.3.1",
+				Name:       "testConfig",
+				Type:       "macvtap",
+			},
+			Master:   MASTER_NAME,
+			Mode:     "bridge",
+			MTU:      updatedMtu,
+			DeviceID: macvtapIfaceName,
+		}
+
+		Expect(err).NotTo(HaveOccurred())
+
+		err = originalNS.Do(func(ns.NetNS) error {
+			defer GinkgoRecover()
+
+			_, err := configureMacvtap(conf, macvtapIfaceName, targetNs)
+			Expect(err).NotTo(HaveOccurred())
+			return nil
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		// Make sure macvtap link exists with the updated configurations
+		err = targetNs.Do(func(ns.NetNS) error {
+			defer GinkgoRecover()
+
+			link, err := netlink.LinkByName(macvtapIfaceName)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(link.Attrs().Name).To(Equal(macvtapIfaceName))
+			Expect(link.Attrs().MTU).To(Equal(updatedMtu))
+			return nil
+		})
+		Expect(err).NotTo(HaveOccurred())
+	})
 
 	It("configures and deconfigures a macvtap link having a user specified mac address with ADD/DEL", func() {
 		const IFNAME = "macvt0"
@@ -285,6 +347,98 @@ var _ = Describe("macvtap Operations", func() {
 
 			_, err := netlink.LinkByName(IFNAME)
 			Expect(err).To(HaveOccurred())
+			return nil
+		})
+		Expect(err).NotTo(HaveOccurred())
+	})
+	It("configures and deconfigures an already existent macvtap link via ADD/DEL", func() {
+		macvtapIfaceName := "mymacvtap0"
+
+		// create the initial macvtap
+		conf := &NetConf{
+			NetConf: types.NetConf{
+				CNIVersion: "0.3.1",
+				Name:       "testConfig",
+				Type:       "macvtap",
+			},
+			Master: MASTER_NAME,
+			Mode:   "bridge",
+		}
+		targetNs, err := testutils.NewNS()
+		Expect(err).NotTo(HaveOccurred())
+		defer targetNs.Close()
+
+		err = originalNS.Do(func(ns.NetNS) error {
+			defer GinkgoRecover()
+
+			_, err := createMacvtap(conf, macvtapIfaceName, originalNS)
+			Expect(err).NotTo(HaveOccurred())
+			return nil
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		cniConf := fmt.Sprintf(`{
+    		"cniVersion": "0.3.1",
+    		"name": "mynet",
+    		"type": "macvtap",
+			"master": "%s",
+			"deviceID": "%s"
+		}`, MASTER_NAME, macvtapIfaceName)
+
+		args := &skel.CmdArgs{
+			ContainerID: "dummy",
+			Netns:       targetNs.Path(),
+			IfName:      macvtapIfaceName,
+			StdinData:   []byte(cniConf),
+		}
+
+		// Make sure macvtap link exists in the target namespace
+		err = originalNS.Do(func(ns.NetNS) error {
+			defer GinkgoRecover()
+
+			_, _, err := testutils.CmdAdd(args.Netns, args.ContainerID, args.IfName, args.StdinData, func() error { return cmdAdd(args) })
+			Expect(err).NotTo(HaveOccurred())
+			return nil
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		// Make sure macvtap link exists in the target namespace
+		err = targetNs.Do(func(ns.NetNS) error {
+			defer GinkgoRecover()
+
+			link, err := netlink.LinkByName(macvtapIfaceName)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(link.Attrs().Name).To(Equal(macvtapIfaceName))
+
+			return nil
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		err = originalNS.Do(func(ns.NetNS) error {
+			defer GinkgoRecover()
+
+			args := &skel.CmdArgs{
+				ContainerID: "dummy",
+				Netns:       targetNs.Path(),
+				IfName:      macvtapIfaceName,
+				StdinData:   []byte(cniConf),
+			}
+
+			err := testutils.CmdDel(args.Netns, args.ContainerID, args.IfName, func() error {
+				return cmdDel(args)
+			})
+			Expect(err).NotTo(HaveOccurred())
+			return nil
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		// Make sure macvtap link has been deleted
+		err = targetNs.Do(func(ns.NetNS) error {
+			defer GinkgoRecover()
+
+			link, err := netlink.LinkByName(macvtapIfaceName)
+			Expect(err).To(HaveOccurred())
+			Expect(link).To(BeNil())
 			return nil
 		})
 		Expect(err).NotTo(HaveOccurred())

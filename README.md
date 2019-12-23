@@ -24,12 +24,14 @@ This repo is a rebase of the initial CNI PR [0].
 
 ## Network Configuration Reference
 
-* `name`   (string, required): the name of the network.
-* `type`   (string, required): "macvtap".
-* `master` (string, required): name of the parent interface.
-* `mode`   (string, optional): mode of the communication between endpoints. Can
+* `name`     (string, required): the name of the network.
+* `type`     (string, required): "macvtap".
+* `master`   (string, required): name of the parent interface.
+* `mode`     (string, optional): mode of the communication between endpoints. Can
   be either *vepa*, *bridge*, or *private*. Defauls to *bridge*.
-* `mtu`    (integer, optional): mtu to set in the macvtap interface.
+* `mtu`      (integer, optional): mtu to set in the macvtap interface.
+* `deviceID` (string, optional): deviceID of an existing macvtap interface, which
+  will be imported, configured, and moved to the correct net namespace.
 
 ## Manual Testing
 
@@ -47,7 +49,8 @@ cat <<EOF | CNI_COMMAND=ADD CNI_CONTAINERID=ns1 CNI_NETNS=/var/run/netns/ns1 CNI
     "type": "macvtap",
     "master": "eth0",
     "mode": "bridge",
-    "mtu": 1500
+    "mtu": 1500,
+    "deviceID": "macvtap0"
 }
 EOF
 
@@ -61,7 +64,8 @@ cat <<EOF | CNI_COMMAND=DEL CNI_CONTAINERID=ns1 CNI_NETNS=/var/run/netns/ns1 CNI
     "type": "macvtap",
     "master": "eth0",
     "mode": "bridge",
-    "mtu": 1500
+    "mtu": 1500,
+    "deviceID": "macvtap0"
 }
 EOF
 
