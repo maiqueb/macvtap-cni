@@ -159,11 +159,18 @@ func createMacvtap(conf *NetConf, ifName string, netns ns.NetNS) (*current.Inter
 		return nil, fmt.Errorf("failed to create macvtap: %v", err)
 	}
 
-	err = configureArp(mv, macvlan, ifName, netns)
+	err = configureArp(mv, netns)
+	if err != nil {
+		return nil, err
+	}
+	err = updateMacvtapIface(mv, macvlan, ifName, netns)
+	if err != nil {
+		return nil, err
+	}
 	return macvlan, nil
 }
 
-func configureArp(macvtapConfig netlink.Link, macvtapIface *current.Interface, ifaceName string, netns ns.NetNS) error {
+func configureArp(macvtapConfig netlink.Link, netns ns.NetNS) error {
 	err := netns.Do(func(_ ns.NetNS) error {
 		// TODO: duplicate following lines for ipv6 support, when it will be added in other places
 		ipv4SysctlValueName := fmt.Sprintf(IPv4InterfaceArpProxySysctlTemplate, macvtapConfig.Attrs().Name)
@@ -172,14 +179,20 @@ func configureArp(macvtapConfig netlink.Link, macvtapIface *current.Interface, i
 			_ = netlink.LinkDel(macvtapConfig)
 			return fmt.Errorf("failed to set proxy_arp on newly added interface %q: %v", macvtapConfig.Attrs().Name, err)
 		}
+		return nil
+	})
+	return err
+}
 
-		err := ip.RenameLink(macvtapConfig.Attrs().Name, ifaceName)
+func updateMacvtapIface(macvtapLink netlink.Link, macvtapIface *current.Interface, ifaceName string, netns ns.NetNS) error {
+	err := netns.Do(func(_ ns.NetNS) error {
+		err := ip.RenameLink(macvtapLink.Attrs().Name, ifaceName)
 		if err != nil {
-			_ = netlink.LinkDel(macvtapConfig)
+			_ = netlink.LinkDel(macvtapLink)
 			return fmt.Errorf("failed to rename macvlan to %q: %v", ifaceName, err)
 		}
 
-		updatedLink := macvtapConfig
+		updatedLink := macvtapLink
 		updatedLink.Attrs().Name = ifaceName
 		if err := netlink.LinkSetUp(updatedLink); err != nil {
 			return fmt.Errorf("failed to set macvtap iface up: %v", err)
@@ -212,7 +225,14 @@ func configureMacvtap(conf *NetConf, ifName string, netns ns.NetNS) (*current.In
 		return nil
 	})
 	macvtap := &current.Interface{Name: ifName}
-	err = configureArp(iface, macvtap, ifName, netns)
+	err = configureArp(iface, netns)
+	if err != nil {
+		return nil, err
+	}
+	err = updateMacvtapIface(iface, macvtap, ifName, netns)
+	if err != nil {
+		return nil, err
+	}
 	return macvtap, err
 }
 
