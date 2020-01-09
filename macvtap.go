@@ -62,20 +62,28 @@ func loadConf(bytes []byte) (*NetConf, string, error) {
 	if err := json.Unmarshal(bytes, n); err != nil {
 		return nil, "", fmt.Errorf("failed to load netconf: %v", err)
 	}
-	if n.Master == "" {
-		return nil, "", fmt.Errorf(`"master" field is required. It specifies the host interface name to virtualize`)
-	}
 
-	// check existing and MTU of master interface
-	masterMTU, err := getMTUByName(n.Master)
-	if err != nil {
-		return nil, "", err
-	}
-	if n.MTU < 0 || n.MTU > masterMTU {
-		return nil, "", fmt.Errorf("invalid MTU %d, must be [0, master MTU(%d)]", n.MTU, masterMTU)
+	if n.Master != "" && n.DeviceID != "" {
+		return nil, "", fmt.Errorf(`""deviceID" attribute cannot be used with "master" attribute."`)
+	} else if n.Master == "" && n.DeviceID == "" {
+		return nil, "", fmt.Errorf(`"Either (exclusive) "deviceID" or "master" attributes are required."`)
 	}
 
 	return n, n.CNIVersion, nil
+}
+
+func validateConf(netConf NetConf) error {
+	if netConf.Master != "" {
+		masterMTU, err := getMTUByName(netConf.Master)
+		// check existing and MTU of master interface
+		if err != nil {
+			return err
+		}
+		if netConf.MTU < 0 || netConf.MTU > masterMTU {
+			return fmt.Errorf("invalid MTU %d, must be [0, master MTU(%d)]", netConf.MTU, masterMTU)
+		}
+	}
+	return nil
 }
 
 func getEnvArgs(envArgsString string) (EnvArgs, error) {
@@ -240,6 +248,9 @@ func configureMacvtap(conf *NetConf, ifName string, netns ns.NetNS) (*current.In
 func cmdAdd(args *skel.CmdArgs) error {
 	n, cniVersion, err := loadConf(args.StdinData)
 	if err != nil {
+		return err
+	}
+	if err = validateConf(*n); err != nil {
 		return err
 	}
 

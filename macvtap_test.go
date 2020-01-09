@@ -31,6 +31,56 @@ import (
 const MASTER_NAME = "eth0"
 const macAddress = "0a:59:00:dc:6a:e0"
 
+var _ = Describe("allowed configurations", func() {
+	It("accepts a configuration w/ the 'master' attribute.", func() {
+		conf := fmt.Sprintf(`{
+    		"cniVersion": "0.3.1",
+    		"name": "mynet",
+    		"type": "macvtap",
+    		"master": "%s"
+		}`, MASTER_NAME)
+		netConf, _, err := loadConf([]byte(conf))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(netConf.Master).To(Equal(MASTER_NAME))
+	})
+	It("accepts a configuration w/ the 'deviceID' attribute.", func() {
+		macvtapIfaceName := "vtap0"
+		conf := fmt.Sprintf(`{
+    		"cniVersion": "0.3.1",
+    		"name": "mynet",
+    		"type": "macvtap",
+    		"deviceID": "%s"
+		}`, macvtapIfaceName)
+		netConf, _, err := loadConf([]byte(conf))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(netConf.DeviceID).To(Equal(macvtapIfaceName))
+	})
+	It("does not accept 'master' *and* 'deviceID' attributes.", func() {
+		macvtapIfaceName := "vtap0"
+		conf := fmt.Sprintf(`{
+    		"cniVersion": "0.3.1",
+    		"name": "mynet",
+			"type": "macvtap",
+			"master": "eth1",
+    		"deviceID": "%s"
+		}`, macvtapIfaceName)
+		_, _, err := loadConf([]byte(conf))
+		Expect(err).To(HaveOccurred())
+	})
+	It("requires either 'master' *or* 'deviceID' attributes.", func() {
+		macvtapIfaceName := "vtap0"
+		conf := fmt.Sprintf(`{
+    		"cniVersion": "0.3.1",
+    		"name": "mynet",
+			"type": "macvtap",
+			"master": "eth1",
+    		"deviceID": "%s"
+		}`, macvtapIfaceName)
+		_, _, err := loadConf([]byte(conf))
+		Expect(err).To(HaveOccurred())
+	})
+})
+
 var _ = Describe("macvtap Operations", func() {
 	var originalNS ns.NetNS
 
@@ -381,9 +431,8 @@ var _ = Describe("macvtap Operations", func() {
     		"cniVersion": "0.3.1",
     		"name": "mynet",
     		"type": "macvtap",
-			"master": "%s",
 			"deviceID": "%s"
-		}`, MASTER_NAME, macvtapIfaceName)
+		}`, macvtapIfaceName)
 
 		args := &skel.CmdArgs{
 			ContainerID: "dummy",
