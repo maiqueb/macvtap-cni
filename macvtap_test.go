@@ -492,4 +492,35 @@ var _ = Describe("macvtap Operations", func() {
 		})
 		Expect(err).NotTo(HaveOccurred())
 	})
+	It("assures the macvtap interface cannot be created with an MTU larger than the lower device", func() {
+		const IFNAME = "macvt0"
+
+		conf := fmt.Sprintf(`{
+    		"cniVersion": "0.3.1",
+    		"name": "mynet",
+    		"type": "macvtap",
+			"master": "%s",
+			"mtu": 9000
+		}`, MASTER_NAME)
+
+		targetNs, err := testutils.NewNS()
+		Expect(err).NotTo(HaveOccurred())
+		defer targetNs.Close()
+
+		args := &skel.CmdArgs{
+			ContainerID: "dummy",
+			Netns:       targetNs.Path(),
+			IfName:      IFNAME,
+			StdinData:   []byte(conf),
+		}
+
+		err = originalNS.Do(func(ns.NetNS) error {
+			defer GinkgoRecover()
+
+			_, _, err := testutils.CmdAdd(args.Netns, args.ContainerID, args.IfName, args.StdinData, func() error { return cmdAdd(args) })
+			Expect(err).To(HaveOccurred())
+			return err
+		})
+		Expect(err).To(HaveOccurred())
+	})
 })
