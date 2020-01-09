@@ -151,6 +151,7 @@ func createMacvtap(conf *NetConf, ifName string, netns ns.NetNS) (*current.Inter
 				Name:        tmpName,
 				ParentIndex: m.Attrs().Index,
 				Namespace:   netlink.NsFd(int(netns.Fd())),
+				TxQLen:      m.Attrs().TxQLen,
 			},
 			Mode: mode,
 		},
