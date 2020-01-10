@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"net"
 	"runtime"
+	"strings"
 
 	"github.com/vishvananda/netlink"
 
@@ -181,8 +182,11 @@ func createMacvtap(conf *NetConf, ifName string, netns ns.NetNS) (*current.Inter
 
 func configureArp(macvtapConfig netlink.Link, netns ns.NetNS) error {
 	err := netns.Do(func(_ ns.NetNS) error {
+		// For sysctl, dots are replaced with forward slashes
+		name := strings.Replace(macvtapConfig.Attrs().Name, ".", "/", -1)
+
 		// TODO: duplicate following lines for ipv6 support, when it will be added in other places
-		ipv4SysctlValueName := fmt.Sprintf(IPv4InterfaceArpProxySysctlTemplate, macvtapConfig.Attrs().Name)
+		ipv4SysctlValueName := fmt.Sprintf(IPv4InterfaceArpProxySysctlTemplate, name)
 		if _, err := sysctl.Sysctl(ipv4SysctlValueName, "1"); err != nil {
 			// remove the newly added link and ignore errors, because we already are in a failed state
 			_ = netlink.LinkDel(macvtapConfig)
