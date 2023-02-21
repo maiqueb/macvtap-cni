@@ -1,4 +1,9 @@
 # macvtap-cni
+**THIS REPO HAS BEEN ARCHIVED.**
+
+It was donated to the upstream KubeVirt community, and is actively being
+developed under the
+[KubeVirt organization](https://github.com/kubevirt/macvtap-cni).
 
 ## Overview
 This plugin allows users to define Kubernetes networks on top of existing
